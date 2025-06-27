@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WIS API Documentation</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #16213e 100%);
+            color: #e0e6ed;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            padding: 60px 0;
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4, #45b7d1, #96ceb4);
+            background-size: 400% 400%;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            animation: gradientShift 4s ease infinite;
+        }
+
+        @keyframes gradientShift {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+
+        .header h1 {
+            font-size: 3.5rem;
+            font-weight: 900;
+            margin-bottom: 10px;
+            text-shadow: 0 0 30px rgba(255, 107, 107, 0.3);
+        }
+
+        .header p {
+            font-size: 1.2rem;
+            opacity: 0.8;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            padding: 30px;
+            margin: 30px 0;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+            transition: left 0.5s;
+        }
+
+        .card:hover::before {
+            left: 100%;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.4);
+            border-color: rgba(255, 107, 107, 0.3);
+        }
+
+        .section-title {
+            font-size: 2rem;
+            margin-bottom: 20px;
+            color: #ff6b6b;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .section-title::before {
+            content: '';
+            width: 4px;
+            height: 30px;
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+            border-radius: 2px;
+        }
+
+        .endpoint {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 15px;
+            padding: 25px;
+            margin: 20px 0;
+            border-left: 4px solid #4ecdc4;
+            transition: all 0.3s ease;
+        }
+
+        .endpoint:hover {
+            border-left-color: #ff6b6b;
+            transform: translateX(5px);
+        }
+
+        .method {
+            display: inline-block;
+            padding: 8px 16px;
+            background: linear-gradient(45deg, #ff6b6b, #ff8e8e);
+            color: white;
+            border-radius: 25px;
+            font-weight: bold;
+            font-size: 0.9rem;
+            margin-right: 15px;
+            text-transform: uppercase;
+            box-shadow: 0 4px 15px rgba(255, 107, 107, 0.3);
+        }
+
+        .url {
+            font-family: 'Courier New', monospace;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 12px 20px;
+            border-radius: 10px;
+            margin: 15px 0;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            word-break: break-all;
+        }
+
+        .code-block {
+            background: rgba(0, 0, 0, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 25px;
+            font-family: 'Courier New', monospace;
+            margin: 20px 0;
+            position: relative;
+            overflow-x: auto;
+        }
+
+        .code-block::before {
+            content: 'JavaScript';
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            background: #4ecdc4;
+            color: #000;
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+
+        .json-block::before {
+            content: 'JSON';
+            background: #45b7d1;
+        }
+
+        .steps {
+            counter-reset: step-counter;
+        }
+
+        .step {
+            counter-increment: step-counter;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 20px;
+            margin: 15px 0;
+            border-left: 4px solid #4ecdc4;
+            position: relative;
+            transition: all 0.3s ease;
+        }
+
+        .step::before {
+            content: counter(step-counter);
+            position: absolute;
+            left: -15px;
+            top: 20px;
+            background: linear-gradient(45deg, #4ecdc4, #44a08d);
+            color: white;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            box-shadow: 0 4px 15px rgba(78, 205, 196, 0.3);
+        }
+
+        .step:hover {
+            transform: translateX(10px);
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        .parameters {
+            display: grid;
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .param {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            padding: 15px;
+            border-left: 3px solid #45b7d1;
+        }
+
+        .param-name {
+            font-weight: bold;
+            color: #4ecdc4;
+            margin-bottom: 5px;
+        }
+
+        .param-type {
+            color: #ffa726;
+            font-size: 0.9rem;
+            font-style: italic;
+            margin-bottom: 8px;
+        }
+
+        .warning {
+            background: rgba(255, 193, 7, 0.1);
+            border: 1px solid rgba(255, 193, 7, 0.3);
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            color: #ffc107;
+        }
+
+        .warning::before {
+            content: '⚠️ ';
+            font-size: 1.2rem;
+        }
+
+        .link {
+            color: #4ecdc4;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        .link:hover {
+            color: #ff6b6b;
+            text-shadow: 0 0 10px rgba(255, 107, 107, 0.5);
+        }
+
+        .link::after {
+            content: '';
+            position: absolute;
+            width: 0;
+            height: 2px;
+            bottom: -2px;
+            left: 0;
+            background: linear-gradient(45deg, #4ecdc4, #ff6b6b);
+            transition: width 0.3s ease;
+        }
+
+        .link:hover::after {
+            width: 100%;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            background: #4caf50;
+            border-radius: 50%;
+            margin-right: 8px;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(76, 175, 80, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0); }
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px;
+            margin: 30px 0;
+        }
+
+        .highlight {
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            font-weight: bold;
+        }
+
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 2.5rem;
+            }
+            
+            .container {
+                padding: 15px;
+            }
+            
+            .card {
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>WIS API</h1>
+            <p>Website Intelligence Service - Advanced Analytics & Visitor Tracking</p>
+        </div>
+
+        <div class="card">
+            <h2 class="section-title">🚀 Getting Started</h2>
+            <p>The Website Intelligence Service API provides real-time visitor analytics with Discord notifications. Track user behavior, geolocation, device information, and more with seamless integration.</p>
+            
+            <div class="warning">
+                <strong>Base URL:</strong> <code>https://wis-api.mcboss.top/</code>
+            </div>
+
+            <div class="endpoint">
+                <div style="display: flex; align-items: center; margin-bottom: 15px;">
+                    <span class="status-indicator"></span>
+                    <strong>Service Status:</strong> <span class="highlight">Operational</span>
+                </div>
+                <p>All systems are running smoothly with 99.9% uptime guarantee</p>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2 class="section-title">🔑 How to Get an API Key</h2>
+            <div class="steps">
+                <div class="step">
+                    <strong>Join our Discord Server</strong><br>
+                    <a href="https://discord.gg/cQQybxV8xW" class="link" target="_blank">https://discord.gg/cQQybxV8xW</a>
+                </div>
+                
+                <div class="step">
+                    <strong>Create a Support Ticket</strong><br>
+                    Navigate to <a href="https://discord.com/channels/1385931113389883422/1385931825334980688" class="link" target="_blank">our ticket channel</a> and create a new ticket
+                </div>
+                
+                <div class="step">
+                    <strong>Wait for Developer Contact</strong><br>
+                    A developer will reach out to you within 24 hours
+                </div>
+                
+                <div class="step">
+                    <strong>Provide Required Information</strong><br>
+                    • Website URL where the API will be used<br>
+                    • API key owner Discord ID<br>
+                    • Log channel ID for notifications<br>
+                    • Discord server ID containing the channel
+                </div>
+                
+                <div class="step">
+                    <strong>Receive Your API Key</strong><br>
+                    You'll receive a unique API key for your website
+                </div>
+            </div>
+
+            <div class="warning">
+                <strong>Important:</strong> Make sure to invite our Discord bot to your server and grant it permission to send messages in your designated log channel.
+                <br><br>
+                <a href="https://discord.com/oauth2/authorize?client_id=1295283605693796423" class="link" target="_blank">🤖 Invite Discord Bot</a>
+            </div>
+        </div>
+
+        <div class="grid">
+            <div class="card">
+                <h2 class="section-title">📊 Main Endpoint</h2>
+                
+                <div class="endpoint">
+                    <div style="margin-bottom: 15px;">
+                        <span class="method">POST</span>
+                        <strong>Log Visitor Data</strong>
+                    </div>
+                    <div class="url">
+                        /api/key/{api_key}/
+                    </div>
+                    <p>Logs visitor information and sends real-time notifications to your Discord channel.</p>
+                </div>
+
+                <h3 style="color: #4ecdc4; margin: 25px 0 15px 0;">📝 Request Parameters</h3>
+                <div class="parameters">
+                    <div class="param">
+                        <div class="param-name">url</div>
+                        <div class="param-type">string (required)</div>
+                        <div>The current page URL where the visitor is tracked</div>
+                    </div>
+                    <div class="param">
+                        <div class="param-name">screen_width</div>
+                        <div class="param-type">number (optional)</div>
+                        <div>Visitor's screen width in pixels</div>
+                    </div>
+                    <div class="param">
+                        <div class="param-name">screen_height</div>
+                        <div class="param-type">number (optional)</div>
+                        <div>Visitor's screen height in pixels</div>
+                    </div>
+                    <div class="param">
+                        <div class="param-name">timezone</div>
+                        <div class="param-type">string (optional)</div>
+                        <div>Visitor's timezone identifier</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2 class="section-title">🔍 System Endpoints</h2>
+                
+                <div class="endpoint">
+                    <div style="margin-bottom: 15px;">
+                        <span class="method" style="background: linear-gradient(45deg, #4caf50, #66bb6a);">GET</span>
+                        <strong>Service Status</strong>
+                    </div>
+                    <div class="url">
+                        /
+                    </div>
+                    <p>Get comprehensive system status and health information</p>
+                </div>
+
+                <div class="endpoint">
+                    <div style="margin-bottom: 15px;">
+                        <span class="method" style="background: linear-gradient(45deg, #2196f3, #42a5f5);">GET</span>
+                        <strong>Health Check</strong>
+                    </div>
+                    <div class="url">
+                        /health
+                    </div>
+                    <p>Simple health check endpoint for monitoring</p>
+                </div>
+
+                <div class="endpoint">
+                    <div style="margin-bottom: 15px;">
+                        <span class="method" style="background: linear-gradient(45deg, #ff9800, #ffb74d);">GET</span>
+                        <strong>Debug Information</strong>
+                    </div>
+                    <div class="url">
+                        /debug/{api_key}
+                    </div>
+                    <p>Detailed debugging information for your API key</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2 class="section-title">💻 Implementation Example</h2>
+            <p>Here's a complete example of how to integrate the WIS API into your website:</p>
+            
+            <div class="code-block">
+// Basic implementation
+fetch('https://wis-api.mcboss.top/api/key/YOUR_API_KEY/', {
+    method: 'POST',
+    headers: {
+        'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+        url: location.href,
+        screen_width: screen.width,
+        screen_height: screen.height,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+    })
+})
+.then(response => response.json())
+.then(data => {
+    console.log('WIS API Response:', data);
+    // Handle successful tracking
+})
+.catch(error => {
+    console.error('WIS API Error:', error);
+    // Handle errors gracefully
+});
+            </div>
+
+            <h3 style="color: #4ecdc4; margin: 25px 0 15px 0;">🔄 Advanced Implementation with Error Handling</h3>
+            <div class="code-block">
+async function trackVisitor() {
+    try {
+        const response = await fetch('https://wis-api.mcboss.top/api/key/YOUR_API_KEY/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                url: window.location.href,
+                screen_width: screen.width,
+                screen_height: screen.height,
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                referrer: document.referrer,
+                user_agent: navigator.userAgent
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        
+        if (data.status === 'logged') {
+            console.log('✅ Visitor tracked successfully');
+            console.log('📊 Fingerprint:', data.fingerprint);
+            console.log('🤖 Discord notification:', data.discord_sent ? '✅ Sent' : '❌ Failed');
+        }
+        
+        return data;
+    } catch (error) {
+        console.error('❌ Tracking failed:', error);
+        return null;
+    }
+}
+
+// Track visitor on page load
+document.addEventListener('DOMContentLoaded', trackVisitor);
+            </div>
+        </div>
+
+        <div class="card">
+            <h2 class="section-title">📋 Response Format</h2>
+            <p>Successful API calls return detailed information about the tracking process:</p>
+            
+            <div class="code-block json-block">
+{
+    "status": "logged",
+    "fingerprint": "a1b2c3d4e5f6",
+    "bot_ready": true,
+    "discord_sent": true,
+    "discord_status": "Success",
+    "cold_start": false,
+    "processed_data": {
+        "ip": "192.168.1.1",
+        "location": "New York, United States",
+        "browser": "Chrome",
+        "os": "Windows"
+    }
+}
+            </div>
+
+            <h3 style="color: #4ecdc4; margin: 25px 0 15px 0;">📊 Response Fields</h3>
+            <div class="parameters">
+                <div class="param">
+                    <div class="param-name">status</div>
+                    <div class="param-type">string</div>
+                    <div>Request status: "logged" for success</div>
+                </div>
+                <div class="param">
+                    <div class="param-name">fingerprint</div>
+                    <div class="param-type">string</div>
+                    <div>Unique device fingerprint for the visitor</div>
+                </div>
+                <div class="param">
+                    <div class="param-name">discord_sent</div>
+                    <div class="param-type">boolean</div>
+                    <div>Whether Discord notification was sent successfully</div>
+                </div>
+                <div class="param">
+                    <div class="param-name">processed_data</div>
+                    <div class="param-type">object</div>
+                    <div>Summary of processed visitor information</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2 class="section-title">🎯 Features</h2>
+            <div class="grid">
+                <div style="background: rgba(255, 107, 107, 0.1); padding: 20px; border-radius: 15px; border-left: 4px solid #ff6b6b;">
+                    <h3 style="color: #ff6b6b;">🌍 Geolocation Tracking</h3>
+                    <p>Accurate country, region, and city detection with ISP information and proxy/VPN detection.</p>
+                </div>
+                <div style="background: rgba(78, 205, 196, 0.1); padding: 20px; border-radius: 15px; border-left: 4px solid #4ecdc4;">
+                    <h3 style="color: #4ecdc4;">📱 Device Intelligence</h3>
+                    <p>Browser detection, OS identification, mobile device recognition, and screen resolution tracking.</p>
+                </div>
+                <div style="background: rgba(69, 183, 209, 0.1); padding: 20px; border-radius: 15px; border-left: 4px solid #45b7d1;">
+                    <h3 style="color: #45b7d1;">🤖 Bot Detection</h3>
+                    <p>Advanced bot traffic filtering to ensure accurate analytics with real human visitors only.</p>
+                </div>
+                <div style="background: rgba(150, 206, 180, 0.1); padding: 20px; border-radius: 15px; border-left: 4px solid #96ceb4;">
+                    <h3 style="color: #96ceb4;">⚡ Real-time Notifications</h3>
+                    <p>Instant Discord embeds with beautiful formatting and comprehensive visitor information.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2 class="section-title">⚠️ Important Notes</h2>
+            <div class="warning">
+                <strong>Security:</strong> Never expose your API key in client-side code in production. Consider implementing server-side proxying for sensitive applications.
+            </div>
+            
+            <div class="warning">
+                <strong>Rate Limiting:</strong> Be mindful of request frequency. The API is designed for visitor tracking, not high-frequency data collection.
+            </div>
+            
+            <div class="warning">
+                <strong>Privacy Compliance:</strong> Ensure your implementation complies with GDPR, CCPA, and other privacy regulations in your jurisdiction.
+            </div>
+        </div>
+
+        <div style="text-align: center; padding: 40px 0; opacity: 0.7;">
+            <p>Made with ❤️ for developers who care about analytics</p>
+            <p style="margin-top: 10px;">
+                <a href="https://discord.gg/cQQybxV8xW" class="link">Join Discord Community</a> • 
+                <a href="https://wis-api.mcboss.top/health" class="link">Service Status</a>
+            </p>
+        </div>
+    </div>
+</body>
+</html>
