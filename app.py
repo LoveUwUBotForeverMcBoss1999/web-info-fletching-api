@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from flask import Flask, request, jsonify, render_template
 import json
 import os
 import discord
@@ -28,6 +29,7 @@ DISCORD_TOKEN = os.environ.get('DISCORD_BOT_TOKEN')
 if not DISCORD_TOKEN:
     raise ValueError("DISCORD_BOT_TOKEN environment variable is required")
 
+
 # Load API keys from keys.json
 def load_api_keys():
     try:
@@ -35,6 +37,7 @@ def load_api_keys():
             return json.load(f)
     except FileNotFoundError:
         return {}
+
 
 API_KEYS = load_api_keys()
 
@@ -96,22 +99,22 @@ async def on_resumed():
 def run_discord_bot():
     """Run Discord bot in a separate thread with proper event loop and reconnection"""
     global discord_loop, bot_ready
-    
+
     while keep_alive_active:  # Allow for reconnection attempts
         try:
             discord_loop = asyncio.new_event_loop()
             asyncio.set_event_loop(discord_loop)
-            
+
             logger.info("Starting Discord bot...")
             discord_loop.run_until_complete(client.start(DISCORD_TOKEN))
-            
+
         except discord.LoginFailure:
             logger.error("Discord login failed - invalid token")
             break
         except Exception as e:
             logger.error(f"Discord bot error: {e}")
             bot_ready = False
-            
+
             if keep_alive_active:
                 logger.info("Attempting to reconnect Discord bot in 10 seconds...")
                 time.sleep(10)
@@ -124,14 +127,14 @@ def run_discord_bot():
 def keep_alive_worker():
     """Keep-alive worker to prevent the app from sleeping"""
     global keep_alive_active
-    
+
     while keep_alive_active:
         try:
             time.sleep(KEEP_ALIVE_INTERVAL)
-            
+
             if not keep_alive_active:
                 break
-                
+
             # Self-ping to keep the app alive
             if SELF_PING_URL:
                 try:
@@ -139,11 +142,11 @@ def keep_alive_worker():
                     logger.info(f"Keep-alive ping: {response.status_code}")
                 except Exception as e:
                     logger.warning(f"Keep-alive ping failed: {e}")
-            
+
             # Check if Discord bot needs reconnection
             if not bot_ready and keep_alive_active:
                 logger.warning("Discord bot not ready, may need reconnection")
-                
+
         except Exception as e:
             logger.error(f"Keep-alive worker error: {e}")
 
@@ -174,10 +177,10 @@ def graceful_shutdown(signum, frame):
     global keep_alive_active
     logger.info("Received shutdown signal, cleaning up...")
     keep_alive_active = False
-    
+
     if client and not client.is_closed():
         asyncio.run_coroutine_threadsafe(client.close(), discord_loop)
-    
+
     sys.exit(0)
 
 
@@ -207,8 +210,9 @@ def get_geolocation(ip):
             logger.warning(f"Geolocation attempt {attempt + 1} failed: {e}")
             if attempt < max_retries - 1:
                 time.sleep(2 ** attempt)  # Exponential backoff
-    
-    return {'country': 'Unknown', 'region': 'Unknown', 'city': 'Unknown', 'isp': 'Unknown', 'proxy': False, 'mobile': False}
+
+    return {'country': 'Unknown', 'region': 'Unknown', 'city': 'Unknown', 'isp': 'Unknown', 'proxy': False,
+            'mobile': False}
 
 
 def parse_user_agent(user_agent):
@@ -368,7 +372,7 @@ async def send_discord_embed(api_key, log_data):
             error_msg = f"Error sending to Discord: {str(e)}"
             logger.error(error_msg)
             return False, error_msg
-            
+
     return False, "Failed after all retry attempts"
 
 
@@ -403,20 +407,20 @@ def api_status():
         current_time = datetime.now()
         uptime = current_time - app_start_time
         time_since_activity = current_time - last_activity
-        
+
         # Determine if this might be a cold start
         is_cold_start = uptime.total_seconds() < 120  # Less than 2 minutes uptime
-        
+
         total_keys = len(API_KEYS)
         bot_status = "online" if bot_ready else ("starting" if is_cold_start else "offline")
-        
+
         # Check accessible configurations
         accessible_configs = 0
         for api_key, config in API_KEYS.items():
             try:
                 guild_id = int(config['discord_server_id'])
                 channel_id = int(config['discord_log_channel_id'])
-                
+
                 if bot_ready:
                     guild = client.get_guild(guild_id)
                     channel = client.get_channel(channel_id)
@@ -424,7 +428,7 @@ def api_status():
                         accessible_configs += 1
             except:
                 continue
-        
+
         # System status with cold start consideration
         if is_cold_start:
             system_status = "starting"
@@ -438,7 +442,7 @@ def api_status():
         else:
             system_status = "offline"
             status_message = "Discord service unavailable"
-        
+
         return jsonify({
             "service_name": "Website Analytics API",
             "version": "1.1",
@@ -473,14 +477,14 @@ def api_status():
             "statistics": {
                 "registered_api_keys": total_keys,
                 "accessible_configurations": accessible_configs,
-                "success_rate": f"{(accessible_configs/total_keys*100):.1f}%" if total_keys > 0 else "0%"
+                "success_rate": f"{(accessible_configs / total_keys * 100):.1f}%" if total_keys > 0 else "0%"
             },
             "performance": {
                 "bot_ready": bot_ready,
                 "response_time_estimate": "< 1s" if not is_cold_start else "5-15s (cold start)"
             }
         })
-        
+
     except Exception as e:
         logger.error(f"Error in api_status: {str(e)}")
         return jsonify({
@@ -498,7 +502,7 @@ def log_visitor(api_key):
         return jsonify({'status': 'ok'})
 
     update_last_activity()
-    
+
     try:
         data = request.get_json()
         if not data:
@@ -588,7 +592,7 @@ def health_check():
     """Enhanced health check endpoint"""
     current_time = datetime.now()
     uptime = current_time - app_start_time
-    
+
     return jsonify({
         'status': 'healthy',
         'timestamp': current_time.strftime('%Y-%m-%d %H:%M:%S UTC'),
@@ -616,7 +620,7 @@ def debug_info(api_key):
 
     current_time = datetime.now()
     uptime = current_time - app_start_time
-    
+
     key_info = API_KEYS[api_key]
     guild_id = int(key_info['discord_server_id'])
     channel_id = int(key_info['discord_log_channel_id'])
@@ -645,11 +649,23 @@ def debug_info(api_key):
         }
     })
 
+@app.route('/api-doc')
+def api_documentation():
+    """API Documentation Page"""
+    try:
+        return render_template('doc-api.html')
+    except Exception as e:
+        logger.error(f"Error loading API documentation: {str(e)}")
+        return jsonify({
+            "error": f"Error loading documentation: {str(e)}",
+            "status": "server_error",
+            "message": "API documentation is temporarily unavailable"
+        }), 500
 
 if __name__ == '__main__':
     logger.info("Starting Website Analytics API...")
     logger.info("Waiting for Discord bot to initialize...")
-    
+
     # Don't wait too long on startup to avoid timeout
     if wait_for_bot_ready(45):
         logger.info("Discord bot ready! Starting Flask app...")
