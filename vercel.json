@@ -1,11 +1,5 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "app.py",
-      "use": "@vercel/python"
-    }
-  ],
   "routes": [
     {
       "src": "/(.*)",
@@ -14,5 +8,11 @@
   ],
   "env": {
     "DISCORD_BOT_TOKEN": "@discord-bot-token"
+  },
+  "functions": {
+    "app.py": {
+      "runtime": "python3.9",
+      "maxDuration": 30
+    }
   }
 }
