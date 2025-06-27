@@ -1,0 +1,14 @@
+{
+  "example_api_key_12345": {
+    "discord_server_id": "123456789012345678",
+    "discord_log_channel_id": "987654321098765432",
+    "owner_id": "111222333444555666",
+    "url": "https://web.realmofsadness.xyz/"
+  },
+  "another_api_key_67890": {
+    "discord_server_id": "234567890123456789",
+    "discord_log_channel_id": "876543210987654321",
+    "owner_id": "222333444555666777",
+    "url": "https://example.com/"
+  }
+}
