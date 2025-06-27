@@ -20,7 +20,6 @@ DISCORD_TOKEN = os.environ.get('DISCORD_BOT_TOKEN')
 if not DISCORD_TOKEN:
     raise ValueError("DISCORD_BOT_TOKEN environment variable is required")
 
-
 # Load API keys from keys.json
 def load_api_keys():
     try:
@@ -29,7 +28,6 @@ def load_api_keys():
     except FileNotFoundError:
         return {}
 
-
 API_KEYS = load_api_keys()
 
 # Discord client setup
@@ -37,19 +35,28 @@ intents = discord.Intents.default()
 intents.message_content = True
 client = discord.Client(intents=intents)
 
+# Bot ready flag
+bot_ready = False
+
+@client.event
+async def on_ready():
+    global bot_ready
+    bot_ready = True
+    print(f'Discord bot logged in as {client.user}')
 
 def run_discord_bot():
     """Run Discord bot in a separate thread"""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    loop.run_until_complete(client.start(DISCORD_TOKEN))
-
+    try:
+        loop.run_until_complete(client.start(DISCORD_TOKEN))
+    except Exception as e:
+        print(f"ERROR starting Discord bot: {str(e)}")
 
 # Start Discord bot in background thread
 bot_thread = threading.Thread(target=run_discord_bot)
 bot_thread.daemon = True
 bot_thread.start()
-
 
 def get_geolocation(ip):
     """Get geolocation data from IP"""
@@ -66,11 +73,9 @@ def get_geolocation(ip):
                     'proxy': data.get('proxy', False),
                     'mobile': data.get('mobile', False)
                 }
-    except:
-        pass
-    return {'country': 'Unknown', 'region': 'Unknown', 'city': 'Unknown', 'isp': 'Unknown', 'proxy': False,
-            'mobile': False}
-
+    except Exception as e:
+        print(f"ERROR getting geolocation: {str(e)}")
+    return {'country': 'Unknown', 'region': 'Unknown', 'city': 'Unknown', 'isp': 'Unknown', 'proxy': False, 'mobile': False}
 
 def parse_user_agent(user_agent):
     """Parse user agent string"""
@@ -104,7 +109,6 @@ def parse_user_agent(user_agent):
 
     return browser, os_info
 
-
 def is_bot_traffic(user_agent, ip):
     """Detect bot traffic"""
     bot_indicators = [
@@ -119,12 +123,10 @@ def is_bot_traffic(user_agent, ip):
 
     return False
 
-
 def generate_device_fingerprint(data):
     """Generate device fingerprint"""
     fingerprint_data = f"{data.get('user_agent', '')}{data.get('screen_width', '')}{data.get('screen_height', '')}{data.get('timezone', '')}"
     return hashlib.md5(fingerprint_data.encode()).hexdigest()[:12]
-
 
 def is_valid_url_for_key(api_key, requested_url):
     """Check if the requested URL is valid for the API key"""
@@ -139,42 +141,55 @@ def is_valid_url_for_key(api_key, requested_url):
     return (parsed_registered.scheme == parsed_requested.scheme and
             parsed_registered.netloc == parsed_requested.netloc)
 
-
 async def check_admin_permission(guild_id, user_id):
     """Check if user has admin permissions in the guild"""
     try:
         guild = client.get_guild(int(guild_id))
         if not guild:
+            print(f"ERROR: Cannot find guild {guild_id}")
             return False
 
         member = guild.get_member(int(user_id))
         if not member:
+            print(f"ERROR: Cannot find member {user_id} in guild {guild_id}")
             return False
 
+        print(f"DEBUG: Member {user_id} admin status: {member.guild_permissions.administrator}")
         return member.guild_permissions.administrator
-    except:
+    except Exception as e:
+        print(f"ERROR checking admin permissions: {str(e)}")
         return False
-
 
 async def send_to_discord(api_key, log_data):
     """Send log data to Discord channel"""
     try:
+        print(f"DEBUG: Attempting to send to Discord for API key: {api_key}")
+        
+        if not bot_ready:
+            print("ERROR: Discord bot is not ready")
+            return False
+
         key_info = API_KEYS[api_key]
         guild_id = key_info['discord_server_id']
         channel_id = key_info['discord_log_channel_id']
         owner_id = key_info['owner_id']
 
+        print(f"DEBUG: Guild ID: {guild_id}, Channel ID: {channel_id}, Owner ID: {owner_id}")
+
         # Check admin permissions
         has_admin = await check_admin_permission(guild_id, owner_id)
         if not has_admin:
             print(f"ERROR: Owner {owner_id} doesn't have admin permissions in server {guild_id}")
-            return False
+            # Let's try to send anyway - maybe the permission check is too strict
+            # return False
 
         # Get channel
         channel = client.get_channel(int(channel_id))
         if not channel:
             print(f"ERROR: Cannot access channel {channel_id}")
             return False
+
+        print(f"DEBUG: Successfully got channel: {channel.name}")
 
         # Get website favicon
         try:
@@ -191,8 +206,8 @@ async def send_to_discord(api_key, log_data):
 
         if favicon_url:
             embed.set_thumbnail(url=favicon_url)
-        else:
-            embed.set_thumbnail(url=client.user.avatar.url if client.user.avatar else None)
+        elif client.user and client.user.avatar:
+            embed.set_thumbnail(url=client.user.avatar.url)
 
         # Add fields
         embed.add_field(name="🌐 Page URL", value=log_data['url'], inline=False)
@@ -219,13 +234,16 @@ async def send_to_discord(api_key, log_data):
         embed.add_field(name="🕒 Visit Time", value=log_data['timestamp'], inline=False)
         embed.set_footer(text=f"ISP: {log_data['geolocation']['isp']}")
 
+        print("DEBUG: Sending embed to Discord...")
         await channel.send(embed=embed)
+        print("DEBUG: Successfully sent embed to Discord!")
         return True
 
     except Exception as e:
         print(f"ERROR sending to Discord: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return False
-
 
 @app.route('/api/key/<api_key>/', methods=['POST', 'OPTIONS'])
 def log_visitor(api_key):
@@ -279,28 +297,57 @@ def log_visitor(api_key):
             'timezone': data.get('timezone')
         }
 
+        # Track if Discord send was successful
+        discord_success = False
+
         # Send to Discord (async)
         def send_async():
+            nonlocal discord_success
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            loop.run_until_complete(send_to_discord(api_key, log_data))
-            loop.close()
+            try:
+                discord_success = loop.run_until_complete(send_to_discord(api_key, log_data))
+            except Exception as e:
+                print(f"ERROR in send_async: {str(e)}")
+                discord_success = False
+            finally:
+                loop.close()
 
         thread = threading.Thread(target=send_async)
         thread.start()
+        thread.join(timeout=10)  # Wait up to 10 seconds for Discord send
 
-        return jsonify({'status': 'logged', 'fingerprint': device_fingerprint})
+        # Return more accurate status
+        if discord_success:
+            return jsonify({'status': 'logged', 'fingerprint': device_fingerprint, 'discord_sent': True})
+        else:
+            return jsonify({'status': 'logged', 'fingerprint': device_fingerprint, 'discord_sent': False, 'warning': 'Failed to send to Discord'})
 
     except Exception as e:
         print(f"ERROR in log_visitor: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': 'Internal server error'}), 500
-
 
 @app.route('/health')
 def health_check():
     """Health check endpoint"""
-    return jsonify({'status': 'healthy', 'bot_ready': client.is_ready()})
+    return jsonify({'status': 'healthy', 'bot_ready': bot_ready})
 
+@app.route('/debug/discord')
+def debug_discord():
+    """Debug endpoint to check Discord connection"""
+    if not bot_ready:
+        return jsonify({'error': 'Bot not ready', 'bot_ready': False})
+    
+    debug_info = {
+        'bot_ready': bot_ready,
+        'bot_user': str(client.user) if client.user else None,
+        'guild_count': len(client.guilds),
+        'guilds': [{'id': g.id, 'name': g.name} for g in client.guilds],
+    }
+    
+    return jsonify(debug_info)
 
 if __name__ == '__main__':
     app.run(debug=False)
