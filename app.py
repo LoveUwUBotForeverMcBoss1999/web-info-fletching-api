@@ -26,6 +26,7 @@ DISCORD_TOKEN = os.environ.get('DISCORD_BOT_TOKEN')
 if not DISCORD_TOKEN:
     raise ValueError("DISCORD_BOT_TOKEN environment variable is required")
 
+
 # Load API keys from keys.json
 def load_api_keys():
     try:
@@ -33,6 +34,7 @@ def load_api_keys():
             return json.load(f)
     except FileNotFoundError:
         return {}
+
 
 API_KEYS = load_api_keys()
 
@@ -48,6 +50,7 @@ bot_ready = False
 discord_loop = None
 executor = ThreadPoolExecutor(max_workers=5)
 
+
 @client.event
 async def on_ready():
     global bot_ready
@@ -55,12 +58,13 @@ async def on_ready():
     logger.info(f'Discord bot logged in as {client.user}')
     logger.info(f'Bot is in {len(client.guilds)} guilds')
 
+
 def run_discord_bot():
     """Run Discord bot in a separate thread with proper event loop"""
     global discord_loop
     discord_loop = asyncio.new_event_loop()
     asyncio.set_event_loop(discord_loop)
-    
+
     try:
         discord_loop.run_until_complete(client.start(DISCORD_TOKEN))
     except Exception as e:
@@ -68,9 +72,11 @@ def run_discord_bot():
     finally:
         discord_loop.close()
 
+
 # Start Discord bot in background thread
 bot_thread = threading.Thread(target=run_discord_bot, daemon=True)
 bot_thread.start()
+
 
 # Wait for bot to be ready
 def wait_for_bot_ready(timeout=30):
@@ -79,6 +85,7 @@ def wait_for_bot_ready(timeout=30):
     while not bot_ready and (time.time() - start_time) < timeout:
         time.sleep(0.5)
     return bot_ready
+
 
 def get_geolocation(ip):
     """Get geolocation data from IP"""
@@ -97,7 +104,9 @@ def get_geolocation(ip):
                 }
     except Exception as e:
         logger.error(f"Geolocation error: {e}")
-    return {'country': 'Unknown', 'region': 'Unknown', 'city': 'Unknown', 'isp': 'Unknown', 'proxy': False, 'mobile': False}
+    return {'country': 'Unknown', 'region': 'Unknown', 'city': 'Unknown', 'isp': 'Unknown', 'proxy': False,
+            'mobile': False}
+
 
 def parse_user_agent(user_agent):
     """Parse user agent string"""
@@ -131,6 +140,7 @@ def parse_user_agent(user_agent):
 
     return browser, os_info
 
+
 def is_bot_traffic(user_agent, ip):
     """Detect bot traffic"""
     bot_indicators = [
@@ -145,10 +155,12 @@ def is_bot_traffic(user_agent, ip):
 
     return False
 
+
 def generate_device_fingerprint(data):
     """Generate device fingerprint"""
     fingerprint_data = f"{data.get('user_agent', '')}{data.get('screen_width', '')}{data.get('screen_height', '')}{data.get('timezone', '')}"
     return hashlib.md5(fingerprint_data.encode()).hexdigest()[:12]
+
 
 def is_valid_url_for_key(api_key, requested_url):
     """Check if the requested URL is valid for the API key"""
@@ -162,6 +174,7 @@ def is_valid_url_for_key(api_key, requested_url):
     # Check if scheme and netloc match
     return (parsed_registered.scheme == parsed_requested.scheme and
             parsed_registered.netloc == parsed_requested.netloc)
+
 
 async def send_discord_embed(api_key, log_data):
     """Send log data to Discord channel - improved version"""
@@ -251,18 +264,19 @@ async def send_discord_embed(api_key, log_data):
         logger.error(error_msg)
         return False, error_msg
 
+
 def send_to_discord_sync(api_key, log_data):
     """Synchronous wrapper for Discord sending"""
     if not bot_ready:
         return False, "Bot not ready"
-    
+
     if not discord_loop:
         return False, "Discord event loop not available"
-    
+
     try:
         # Use asyncio.run_coroutine_threadsafe to run coroutine in the Discord event loop
         future = asyncio.run_coroutine_threadsafe(
-            send_discord_embed(api_key, log_data), 
+            send_discord_embed(api_key, log_data),
             discord_loop
         )
         # Wait for result with timeout
@@ -273,6 +287,130 @@ def send_to_discord_sync(api_key, log_data):
     except Exception as e:
         return False, f"Error in sync wrapper: {str(e)}"
 
+
+@app.route('/')
+def api_status():
+    """API Status page - client friendly overview"""
+    try:
+        # Calculate uptime (approximate since we don't track start time)
+        current_time = datetime.now()
+
+        # Count registered API keys
+        total_keys = len(API_KEYS)
+
+        # Check Discord bot status
+        bot_status = "online" if bot_ready else "offline"
+
+        # Get basic bot info without exposing sensitive data
+        bot_info = {
+            "status": bot_status,
+            "connected_servers": len(client.guilds) if bot_ready else 0,
+            "username": client.user.name if client.user else "Not connected"
+        }
+
+        # Check if we can access our configured servers/channels
+        accessible_configs = 0
+        for api_key, config in API_KEYS.items():
+            try:
+                guild_id = int(config['discord_server_id'])
+                channel_id = int(config['discord_log_channel_id'])
+
+                if bot_ready:
+                    guild = client.get_guild(guild_id)
+                    channel = client.get_channel(channel_id)
+                    if guild and channel:
+                        accessible_configs += 1
+            except:
+                continue
+
+        # Overall system status
+        if bot_ready and accessible_configs == total_keys:
+            system_status = "operational"
+            status_color = "#00ff88"
+        elif bot_ready and accessible_configs > 0:
+            system_status = "partial_outage"
+            status_color = "#ffaa00"
+        else:
+            system_status = "offline"
+            status_color = "#ff4444"
+
+        # API endpoints status
+        endpoints = [
+            {
+                "name": "Visitor Logging",
+                "path": "/api/key/{api_key}/",
+                "method": "POST",
+                "status": "operational" if bot_ready else "degraded"
+            },
+            {
+                "name": "Health Check",
+                "path": "/health",
+                "method": "GET",
+                "status": "operational"
+            }
+        ]
+
+        return jsonify({
+            "service_name": "Website Analytics API",
+            "version": "1.0",
+            "status": system_status,
+            "timestamp": current_time.strftime('%Y-%m-%d %H:%M:%S UTC'),
+            "components": {
+                "api_server": {
+                    "status": "operational",
+                    "description": "Main API server"
+                },
+                "discord_bot": {
+                    "status": bot_status,
+                    "description": "Discord notification service",
+                    "connected_servers": bot_info["connected_servers"]
+                },
+                "geolocation_service": {
+                    "status": "operational",
+                    "description": "IP geolocation lookup"
+                }
+            },
+            "statistics": {
+                "registered_api_keys": total_keys,
+                "accessible_configurations": accessible_configs,
+                "success_rate": f"{(accessible_configs / total_keys * 100):.1f}%" if total_keys > 0 else "0%"
+            },
+            "endpoints": endpoints,
+            "features": [
+                "Real-time visitor tracking",
+                "Geolocation detection",
+                "Device fingerprinting",
+                "Bot traffic detection",
+                "Discord notifications",
+                "Cross-origin support"
+            ],
+            "status_codes": {
+                "operational": "All systems functioning normally",
+                "partial_outage": "Some services experiencing issues",
+                "offline": "Service unavailable"
+            }
+        })
+
+    except Exception as e:
+        logger.error(f"Error in api_status: {str(e)}")
+        return jsonify({
+            "service_name": "Website Analytics API",
+            "status": "error",
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC'),
+            "message": "Unable to determine system status",
+            "components": {
+                "api_server": {
+                    "status": "operational",
+                    "description": "Main API server"
+                },
+                "discord_bot": {
+                    "status": "unknown",
+                    "description": "Discord notification service"
+                }
+            }
+        }), 500
+    
+    
 @app.route('/api/key/<api_key>/', methods=['POST', 'OPTIONS'])
 def log_visitor(api_key):
     """Main API endpoint for logging visitors"""
@@ -334,7 +472,7 @@ def log_visitor(api_key):
         # Send to Discord synchronously to get immediate result
         discord_success = False
         discord_message = "Not attempted"
-        
+
         if bot_ready:
             try:
                 discord_success, discord_message = send_to_discord_sync(api_key, log_data)
@@ -363,6 +501,7 @@ def log_visitor(api_key):
         logger.error(f"ERROR in log_visitor: {str(e)}")
         return jsonify({'error': 'Internal server error', 'details': str(e)}), 500
 
+
 @app.route('/health')
 def health_check():
     """Health check endpoint"""
@@ -373,6 +512,7 @@ def health_check():
         'guilds_count': len(client.guilds) if bot_ready else 0,
         'guilds': [{'id': g.id, 'name': g.name} for g in client.guilds] if bot_ready else []
     })
+
 
 @app.route('/debug/<api_key>')
 def debug_info(api_key):
@@ -395,7 +535,8 @@ def debug_info(api_key):
             test_log = {
                 'url': 'https://test.com',
                 'ip': '127.0.0.1',
-                'geolocation': {'city': 'Test', 'region': 'Test', 'country': 'Test', 'isp': 'Test', 'proxy': False, 'mobile': False},
+                'geolocation': {'city': 'Test', 'region': 'Test', 'country': 'Test', 'isp': 'Test', 'proxy': False,
+                                'mobile': False},
                 'browser': 'Test Browser',
                 'os': 'Test OS',
                 'user_agent': 'Test Agent',
@@ -408,7 +549,7 @@ def debug_info(api_key):
                 'screen_height': 1080,
                 'timezone': 'UTC'
             }
-            
+
             success, message = send_to_discord_sync(api_key, test_log)
             discord_test_result = f"{'Success' if success else 'Failed'}: {message}"
         except Exception as e:
@@ -429,6 +570,7 @@ def debug_info(api_key):
         'discord_test': discord_test_result
     })
 
+
 if __name__ == '__main__':
     # Wait for bot to be ready before starting Flask
     logger.info("Waiting for Discord bot to be ready...")
@@ -436,5 +578,5 @@ if __name__ == '__main__':
         logger.info("Bot is ready! Starting Flask app...")
     else:
         logger.warning("Bot not ready after 30 seconds, starting Flask anyway...")
-    
+
     app.run(debug=False, host='0.0.0.0', port=5000)
