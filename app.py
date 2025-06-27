@@ -33,9 +33,11 @@ API_KEYS = load_api_keys()
 # Discord client setup
 intents = discord.Intents.default()
 intents.message_content = True
+intents.guilds = True
+intents.guild_messages = True
 client = discord.Client(intents=intents)
 
-# Bot ready flag
+# Global variable to track bot readiness
 bot_ready = False
 
 @client.event
@@ -51,7 +53,7 @@ def run_discord_bot():
     try:
         loop.run_until_complete(client.start(DISCORD_TOKEN))
     except Exception as e:
-        print(f"ERROR starting Discord bot: {str(e)}")
+        print(f"Discord bot error: {e}")
 
 # Start Discord bot in background thread
 bot_thread = threading.Thread(target=run_discord_bot)
@@ -74,7 +76,7 @@ def get_geolocation(ip):
                     'mobile': data.get('mobile', False)
                 }
     except Exception as e:
-        print(f"ERROR getting geolocation: {str(e)}")
+        print(f"Geolocation error: {e}")
     return {'country': 'Unknown', 'region': 'Unknown', 'city': 'Unknown', 'isp': 'Unknown', 'proxy': False, 'mobile': False}
 
 def parse_user_agent(user_agent):
@@ -141,55 +143,33 @@ def is_valid_url_for_key(api_key, requested_url):
     return (parsed_registered.scheme == parsed_requested.scheme and
             parsed_registered.netloc == parsed_requested.netloc)
 
-async def check_admin_permission(guild_id, user_id):
-    """Check if user has admin permissions in the guild"""
-    try:
-        guild = client.get_guild(int(guild_id))
-        if not guild:
-            print(f"ERROR: Cannot find guild {guild_id}")
-            return False
-
-        member = guild.get_member(int(user_id))
-        if not member:
-            print(f"ERROR: Cannot find member {user_id} in guild {guild_id}")
-            return False
-
-        print(f"DEBUG: Member {user_id} admin status: {member.guild_permissions.administrator}")
-        return member.guild_permissions.administrator
-    except Exception as e:
-        print(f"ERROR checking admin permissions: {str(e)}")
-        return False
-
 async def send_to_discord(api_key, log_data):
     """Send log data to Discord channel"""
     try:
-        print(f"DEBUG: Attempting to send to Discord for API key: {api_key}")
-        
         if not bot_ready:
-            print("ERROR: Discord bot is not ready")
+            print("Bot not ready yet")
+            return False
+            
+        key_info = API_KEYS[api_key]
+        guild_id = int(key_info['discord_server_id'])
+        channel_id = int(key_info['discord_log_channel_id'])
+        owner_id = int(key_info['owner_id'])
+
+        print(f"Attempting to send to guild: {guild_id}, channel: {channel_id}")
+
+        # Get guild
+        guild = client.get_guild(guild_id)
+        if not guild:
+            print(f"ERROR: Cannot access guild {guild_id}")
             return False
 
-        key_info = API_KEYS[api_key]
-        guild_id = key_info['discord_server_id']
-        channel_id = key_info['discord_log_channel_id']
-        owner_id = key_info['owner_id']
-
-        print(f"DEBUG: Guild ID: {guild_id}, Channel ID: {channel_id}, Owner ID: {owner_id}")
-
-        # Check admin permissions
-        has_admin = await check_admin_permission(guild_id, owner_id)
-        if not has_admin:
-            print(f"ERROR: Owner {owner_id} doesn't have admin permissions in server {guild_id}")
-            # Let's try to send anyway - maybe the permission check is too strict
-            # return False
-
         # Get channel
-        channel = client.get_channel(int(channel_id))
+        channel = client.get_channel(channel_id)
         if not channel:
             print(f"ERROR: Cannot access channel {channel_id}")
             return False
 
-        print(f"DEBUG: Successfully got channel: {channel.name}")
+        print(f"Found guild: {guild.name}, channel: {channel.name}")
 
         # Get website favicon
         try:
@@ -206,8 +186,6 @@ async def send_to_discord(api_key, log_data):
 
         if favicon_url:
             embed.set_thumbnail(url=favicon_url)
-        elif client.user and client.user.avatar:
-            embed.set_thumbnail(url=client.user.avatar.url)
 
         # Add fields
         embed.add_field(name="🌐 Page URL", value=log_data['url'], inline=False)
@@ -234,15 +212,12 @@ async def send_to_discord(api_key, log_data):
         embed.add_field(name="🕒 Visit Time", value=log_data['timestamp'], inline=False)
         embed.set_footer(text=f"ISP: {log_data['geolocation']['isp']}")
 
-        print("DEBUG: Sending embed to Discord...")
         await channel.send(embed=embed)
-        print("DEBUG: Successfully sent embed to Discord!")
+        print("Successfully sent embed to Discord")
         return True
 
     except Exception as e:
         print(f"ERROR sending to Discord: {str(e)}")
-        import traceback
-        traceback.print_exc()
         return False
 
 @app.route('/api/key/<api_key>/', methods=['POST', 'OPTIONS'])
@@ -277,6 +252,9 @@ def log_visitor(api_key):
         geolocation = get_geolocation(visitor_ip)
         browser, os_info = parse_user_agent(user_agent)
         is_bot = is_bot_traffic(user_agent, visitor_ip)
+        
+        # Add user_agent to data for fingerprint generation
+        data['user_agent'] = user_agent
         device_fingerprint = generate_device_fingerprint(data)
 
         # Prepare log data
@@ -297,57 +275,80 @@ def log_visitor(api_key):
             'timezone': data.get('timezone')
         }
 
-        # Track if Discord send was successful
-        discord_success = False
+        print(f"Processing visitor log for API key: {api_key}")
+        print(f"Visitor data: IP={visitor_ip}, Browser={browser}, OS={os_info}")
 
-        # Send to Discord (async)
-        def send_async():
-            nonlocal discord_success
+        # Send to Discord (async) - improved version
+        async def send_async():
+            try:
+                success = await send_to_discord(api_key, log_data)
+                print(f"Discord send result: {success}")
+            except Exception as e:
+                print(f"Async Discord send error: {e}")
+
+        # Create new event loop for this thread
+        def run_async():
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
-                discord_success = loop.run_until_complete(send_to_discord(api_key, log_data))
+                loop.run_until_complete(send_async())
             except Exception as e:
-                print(f"ERROR in send_async: {str(e)}")
-                discord_success = False
+                print(f"Event loop error: {e}")
             finally:
                 loop.close()
 
-        thread = threading.Thread(target=send_async)
+        thread = threading.Thread(target=run_async)
+        thread.daemon = True
         thread.start()
-        thread.join(timeout=10)  # Wait up to 10 seconds for Discord send
 
-        # Return more accurate status
-        if discord_success:
-            return jsonify({'status': 'logged', 'fingerprint': device_fingerprint, 'discord_sent': True})
-        else:
-            return jsonify({'status': 'logged', 'fingerprint': device_fingerprint, 'discord_sent': False, 'warning': 'Failed to send to Discord'})
+        return jsonify({
+            'status': 'logged', 
+            'fingerprint': device_fingerprint,
+            'bot_ready': bot_ready,
+            'processed_data': {
+                'ip': visitor_ip,
+                'location': f"{geolocation['city']}, {geolocation['country']}",
+                'browser': browser,
+                'os': os_info
+            }
+        })
 
     except Exception as e:
         print(f"ERROR in log_visitor: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': 'Internal server error'}), 500
+        return jsonify({'error': 'Internal server error', 'details': str(e)}), 500
 
 @app.route('/health')
 def health_check():
     """Health check endpoint"""
-    return jsonify({'status': 'healthy', 'bot_ready': bot_ready})
-
-@app.route('/debug/discord')
-def debug_discord():
-    """Debug endpoint to check Discord connection"""
-    if not bot_ready:
-        return jsonify({'error': 'Bot not ready', 'bot_ready': False})
-    
-    debug_info = {
+    return jsonify({
+        'status': 'healthy', 
         'bot_ready': bot_ready,
         'bot_user': str(client.user) if client.user else None,
-        'guild_count': len(client.guilds),
-        'guilds': [{'id': g.id, 'name': g.name} for g in client.guilds],
-    }
+        'guilds_count': len(client.guilds) if bot_ready else 0
+    })
+
+@app.route('/debug/<api_key>')
+def debug_info(api_key):
+    """Debug endpoint to check API key configuration"""
+    if api_key not in API_KEYS:
+        return jsonify({'error': 'Invalid API key'}), 401
     
-    return jsonify(debug_info)
+    key_info = API_KEYS[api_key]
+    guild_id = int(key_info['discord_server_id'])
+    channel_id = int(key_info['discord_log_channel_id'])
+    
+    guild = client.get_guild(guild_id) if bot_ready else None
+    channel = client.get_channel(channel_id) if bot_ready else None
+    
+    return jsonify({
+        'api_key': api_key,
+        'bot_ready': bot_ready,
+        'guild_found': guild is not None,
+        'guild_name': guild.name if guild else None,
+        'channel_found': channel is not None,
+        'channel_name': channel.name if channel else None,
+        'registered_url': key_info['url']
+    })
 
 if __name__ == '__main__':
     app.run(debug=False)
