@@ -11,9 +11,15 @@ import requests
 import re
 from urllib.parse import urlparse
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
+import logging
 
 app = Flask(__name__)
 CORS(app)
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Discord bot setup
 DISCORD_TOKEN = os.environ.get('DISCORD_BOT_TOKEN')
@@ -37,28 +43,42 @@ intents.guilds = True
 intents.guild_messages = True
 client = discord.Client(intents=intents)
 
-# Global variable to track bot readiness
+# Global variables
 bot_ready = False
+discord_loop = None
+executor = ThreadPoolExecutor(max_workers=5)
 
 @client.event
 async def on_ready():
     global bot_ready
     bot_ready = True
-    print(f'Discord bot logged in as {client.user}')
+    logger.info(f'Discord bot logged in as {client.user}')
+    logger.info(f'Bot is in {len(client.guilds)} guilds')
 
 def run_discord_bot():
-    """Run Discord bot in a separate thread"""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    """Run Discord bot in a separate thread with proper event loop"""
+    global discord_loop
+    discord_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(discord_loop)
+    
     try:
-        loop.run_until_complete(client.start(DISCORD_TOKEN))
+        discord_loop.run_until_complete(client.start(DISCORD_TOKEN))
     except Exception as e:
-        print(f"Discord bot error: {e}")
+        logger.error(f"Discord bot error: {e}")
+    finally:
+        discord_loop.close()
 
 # Start Discord bot in background thread
-bot_thread = threading.Thread(target=run_discord_bot)
-bot_thread.daemon = True
+bot_thread = threading.Thread(target=run_discord_bot, daemon=True)
 bot_thread.start()
+
+# Wait for bot to be ready
+def wait_for_bot_ready(timeout=30):
+    """Wait for bot to be ready with timeout"""
+    start_time = time.time()
+    while not bot_ready and (time.time() - start_time) < timeout:
+        time.sleep(0.5)
+    return bot_ready
 
 def get_geolocation(ip):
     """Get geolocation data from IP"""
@@ -76,7 +96,7 @@ def get_geolocation(ip):
                     'mobile': data.get('mobile', False)
                 }
     except Exception as e:
-        print(f"Geolocation error: {e}")
+        logger.error(f"Geolocation error: {e}")
     return {'country': 'Unknown', 'region': 'Unknown', 'city': 'Unknown', 'isp': 'Unknown', 'proxy': False, 'mobile': False}
 
 def parse_user_agent(user_agent):
@@ -143,33 +163,34 @@ def is_valid_url_for_key(api_key, requested_url):
     return (parsed_registered.scheme == parsed_requested.scheme and
             parsed_registered.netloc == parsed_requested.netloc)
 
-async def send_to_discord(api_key, log_data):
-    """Send log data to Discord channel"""
+async def send_discord_embed(api_key, log_data):
+    """Send log data to Discord channel - improved version"""
     try:
         if not bot_ready:
-            print("Bot not ready yet")
-            return False
-            
+            logger.warning("Bot not ready yet")
+            return False, "Bot not ready"
+
         key_info = API_KEYS[api_key]
         guild_id = int(key_info['discord_server_id'])
         channel_id = int(key_info['discord_log_channel_id'])
-        owner_id = int(key_info['owner_id'])
 
-        print(f"Attempting to send to guild: {guild_id}, channel: {channel_id}")
+        logger.info(f"Attempting to send to guild: {guild_id}, channel: {channel_id}")
 
         # Get guild
         guild = client.get_guild(guild_id)
         if not guild:
-            print(f"ERROR: Cannot access guild {guild_id}")
-            return False
+            error_msg = f"Cannot access guild {guild_id}. Bot may not be in this server."
+            logger.error(error_msg)
+            return False, error_msg
 
         # Get channel
         channel = client.get_channel(channel_id)
         if not channel:
-            print(f"ERROR: Cannot access channel {channel_id}")
-            return False
+            error_msg = f"Cannot access channel {channel_id}. Channel may not exist or bot lacks permissions."
+            logger.error(error_msg)
+            return False, error_msg
 
-        print(f"Found guild: {guild.name}, channel: {channel.name}")
+        logger.info(f"Found guild: {guild.name}, channel: {channel.name}")
 
         # Get website favicon
         try:
@@ -212,13 +233,45 @@ async def send_to_discord(api_key, log_data):
         embed.add_field(name="🕒 Visit Time", value=log_data['timestamp'], inline=False)
         embed.set_footer(text=f"ISP: {log_data['geolocation']['isp']}")
 
+        # Send the embed
         await channel.send(embed=embed)
-        print("Successfully sent embed to Discord")
-        return True
+        logger.info("Successfully sent embed to Discord")
+        return True, "Success"
 
+    except discord.Forbidden:
+        error_msg = "Bot lacks permissions to send messages in this channel"
+        logger.error(error_msg)
+        return False, error_msg
+    except discord.HTTPException as e:
+        error_msg = f"Discord HTTP error: {str(e)}"
+        logger.error(error_msg)
+        return False, error_msg
     except Exception as e:
-        print(f"ERROR sending to Discord: {str(e)}")
-        return False
+        error_msg = f"Unexpected error sending to Discord: {str(e)}"
+        logger.error(error_msg)
+        return False, error_msg
+
+def send_to_discord_sync(api_key, log_data):
+    """Synchronous wrapper for Discord sending"""
+    if not bot_ready:
+        return False, "Bot not ready"
+    
+    if not discord_loop:
+        return False, "Discord event loop not available"
+    
+    try:
+        # Use asyncio.run_coroutine_threadsafe to run coroutine in the Discord event loop
+        future = asyncio.run_coroutine_threadsafe(
+            send_discord_embed(api_key, log_data), 
+            discord_loop
+        )
+        # Wait for result with timeout
+        success, message = future.result(timeout=10)
+        return success, message
+    except asyncio.TimeoutError:
+        return False, "Timeout waiting for Discord response"
+    except Exception as e:
+        return False, f"Error in sync wrapper: {str(e)}"
 
 @app.route('/api/key/<api_key>/', methods=['POST', 'OPTIONS'])
 def log_visitor(api_key):
@@ -252,7 +305,7 @@ def log_visitor(api_key):
         geolocation = get_geolocation(visitor_ip)
         browser, os_info = parse_user_agent(user_agent)
         is_bot = is_bot_traffic(user_agent, visitor_ip)
-        
+
         # Add user_agent to data for fingerprint generation
         data['user_agent'] = user_agent
         device_fingerprint = generate_device_fingerprint(data)
@@ -275,36 +328,29 @@ def log_visitor(api_key):
             'timezone': data.get('timezone')
         }
 
-        print(f"Processing visitor log for API key: {api_key}")
-        print(f"Visitor data: IP={visitor_ip}, Browser={browser}, OS={os_info}")
+        logger.info(f"Processing visitor log for API key: {api_key}")
+        logger.info(f"Visitor data: IP={visitor_ip}, Browser={browser}, OS={os_info}")
 
-        # Send to Discord (async) - improved version
-        async def send_async():
+        # Send to Discord synchronously to get immediate result
+        discord_success = False
+        discord_message = "Not attempted"
+        
+        if bot_ready:
             try:
-                success = await send_to_discord(api_key, log_data)
-                print(f"Discord send result: {success}")
+                discord_success, discord_message = send_to_discord_sync(api_key, log_data)
+                logger.info(f"Discord send result: {discord_success} - {discord_message}")
             except Exception as e:
-                print(f"Async Discord send error: {e}")
-
-        # Create new event loop for this thread
-        def run_async():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                loop.run_until_complete(send_async())
-            except Exception as e:
-                print(f"Event loop error: {e}")
-            finally:
-                loop.close()
-
-        thread = threading.Thread(target=run_async)
-        thread.daemon = True
-        thread.start()
+                discord_message = f"Error: {str(e)}"
+                logger.error(f"Discord send error: {e}")
+        else:
+            discord_message = "Bot not ready"
 
         return jsonify({
-            'status': 'logged', 
+            'status': 'logged',
             'fingerprint': device_fingerprint,
             'bot_ready': bot_ready,
+            'discord_sent': discord_success,
+            'discord_status': discord_message,
             'processed_data': {
                 'ip': visitor_ip,
                 'location': f"{geolocation['city']}, {geolocation['country']}",
@@ -314,17 +360,18 @@ def log_visitor(api_key):
         })
 
     except Exception as e:
-        print(f"ERROR in log_visitor: {str(e)}")
+        logger.error(f"ERROR in log_visitor: {str(e)}")
         return jsonify({'error': 'Internal server error', 'details': str(e)}), 500
 
 @app.route('/health')
 def health_check():
     """Health check endpoint"""
     return jsonify({
-        'status': 'healthy', 
+        'status': 'healthy',
         'bot_ready': bot_ready,
         'bot_user': str(client.user) if client.user else None,
-        'guilds_count': len(client.guilds) if bot_ready else 0
+        'guilds_count': len(client.guilds) if bot_ready else 0,
+        'guilds': [{'id': g.id, 'name': g.name} for g in client.guilds] if bot_ready else []
     })
 
 @app.route('/debug/<api_key>')
@@ -332,23 +379,62 @@ def debug_info(api_key):
     """Debug endpoint to check API key configuration"""
     if api_key not in API_KEYS:
         return jsonify({'error': 'Invalid API key'}), 401
-    
+
     key_info = API_KEYS[api_key]
     guild_id = int(key_info['discord_server_id'])
     channel_id = int(key_info['discord_log_channel_id'])
-    
+
     guild = client.get_guild(guild_id) if bot_ready else None
     channel = client.get_channel(channel_id) if bot_ready else None
-    
+
+    # Test Discord connection
+    discord_test_result = "Not tested"
+    if bot_ready and guild and channel:
+        try:
+            # Create a simple test log
+            test_log = {
+                'url': 'https://test.com',
+                'ip': '127.0.0.1',
+                'geolocation': {'city': 'Test', 'region': 'Test', 'country': 'Test', 'isp': 'Test', 'proxy': False, 'mobile': False},
+                'browser': 'Test Browser',
+                'os': 'Test OS',
+                'user_agent': 'Test Agent',
+                'referrer': '',
+                'is_mobile': False,
+                'is_bot': False,
+                'device_fingerprint': 'test123',
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC'),
+                'screen_width': 1920,
+                'screen_height': 1080,
+                'timezone': 'UTC'
+            }
+            
+            success, message = send_to_discord_sync(api_key, test_log)
+            discord_test_result = f"{'Success' if success else 'Failed'}: {message}"
+        except Exception as e:
+            discord_test_result = f"Test failed: {str(e)}"
+
     return jsonify({
         'api_key': api_key,
         'bot_ready': bot_ready,
+        'bot_user': str(client.user) if client.user else None,
         'guild_found': guild is not None,
         'guild_name': guild.name if guild else None,
+        'guild_id': guild_id,
         'channel_found': channel is not None,
         'channel_name': channel.name if channel else None,
-        'registered_url': key_info['url']
+        'channel_id': channel_id,
+        'registered_url': key_info['url'],
+        'bot_permissions': channel.permissions_for(guild.me).send_messages if (guild and channel) else None,
+        'discord_test': discord_test_result
     })
 
 if __name__ == '__main__':
-    app.run(debug=False)
+    # Wait for bot to be ready before starting Flask
+    logger.info("Waiting for Discord bot to be ready...")
+    if wait_for_bot_ready(30):
+        logger.info("Bot is ready! Starting Flask app...")
+    else:
+        logger.warning("Bot not ready after 30 seconds, starting Flask anyway...")
+    
+    app.run(debug=False, host='0.0.0.0', port=5000)
